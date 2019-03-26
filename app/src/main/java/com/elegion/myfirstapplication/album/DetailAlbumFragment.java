@@ -20,6 +20,11 @@ import com.elegion.myfirstapplication.model.Song;
 import java.util.ArrayList;
 import java.util.List;
 
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.functions.Action;
+import io.reactivex.functions.Consumer;
+import io.reactivex.schedulers.Schedulers;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
@@ -27,6 +32,7 @@ import retrofit2.Response;
 public class DetailAlbumFragment extends Fragment implements SwipeRefreshLayout.OnRefreshListener {
     private static final String ALBUM_KEY = "ALBUM_KEY";
 
+    private Disposable mSubscription;
     private RecyclerView mRecyclerView;
     private SwipeRefreshLayout mRefresher;
     private View mErrorView;
@@ -87,27 +93,44 @@ public class DetailAlbumFragment extends Fragment implements SwipeRefreshLayout.
 
     private void getAlbum() {
 
-        ApiUtils.getApiService().getAlbum(mAlbum.getId()).enqueue(new Callback<Album>() {
-            @Override
-            public void onResponse(Call<Album> call, Response<Album> response) {
-                if (response.isSuccessful()) {
-                    mErrorView.setVisibility(View.GONE);
-                    mRecyclerView.setVisibility(View.VISIBLE);
-                    mSongsAdapter.addData(response.body().getData().getSongs(), true);
-                } else {
-                    mErrorView.setVisibility(View.VISIBLE);
-                    mRecyclerView.setVisibility(View.GONE);
+        mSubscription = ApiUtils.getApiService()
+            .getAlbum(mAlbum.getId())
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .doOnSubscribe(new Consumer<Disposable>() {
+                @Override
+                public void accept(Disposable disposable) throws Exception {
+                    mRefresher.setRefreshing(true);
                 }
-                mRefresher.setRefreshing(false);
-            }
+            })
+            .doFinally(new Action() {
+                @Override
+                public void run() throws Exception {
+                    mRefresher.setRefreshing(false);
+                }
+            })
+            .subscribe(
+                new Consumer<Album>() {
+                    @Override
+                    public void accept(Album album) throws Exception {
+                        mErrorView.setVisibility(View.GONE);
+                        mRecyclerView.setVisibility(View.VISIBLE);
+                        mSongsAdapter.addData(album.getData().getSongs(), true);
+                    }
+                }, new Consumer<Throwable>() {
+                    @Override
+                    public void accept(Throwable throwable) throws Exception {
+                        mErrorView.setVisibility(View.VISIBLE);
+                        mRecyclerView.setVisibility(View.GONE);
+                    }
+                }
+            );
 
-            @Override
-            public void onFailure(Call<Album> call, Throwable t) {
-                mErrorView.setVisibility(View.VISIBLE);
-                mRecyclerView.setVisibility(View.GONE);
-                mRefresher.setRefreshing(false);
-            }
-        });
     }
 
+    @Override
+    public void onDestroy() {
+        mSubscription.dispose();
+        super.onDestroy();
+    }
 }
